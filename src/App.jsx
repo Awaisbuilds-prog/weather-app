@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import "./App.css";
 
@@ -38,8 +37,6 @@ function getLocalArea(latitude, longitude) {
     RAMORA_CENTER.lon
   );
 
-  // UOM / Ramora area
-  // The radius can be adjusted later if necessary.
   if (distance <= 2.0) {
     return {
       name: "Ramora",
@@ -54,6 +51,7 @@ function getLocalArea(latitude, longitude) {
 
 export default function App() {
   const [weather, setWeather] = useState(null);
+  const [forecast, setForecast] = useState([]);
   const [location, setLocation] = useState(null);
   const [searchCity, setSearchCity] = useState("");
   const [loading, setLoading] = useState(true);
@@ -132,14 +130,92 @@ export default function App() {
   };
 
   // -----------------------------
+  // GET 7 DAY FORECAST
+  // -----------------------------
+  const getForecast = async (latitude, longitude) => {
+    try {
+      /*
+        OpenWeather 5-day forecast endpoint.
+        It provides forecasts every 3 hours.
+
+        We group those forecasts by date and select
+        one daytime forecast for each day.
+      */
+
+      const response = await fetch(
+        `https://api.openweathermap.org/data/2.5/forecast?lat=${latitude}&lon=${longitude}&units=metric&appid=${API_KEY}`
+      );
+
+      if (!response.ok) {
+        throw new Error("Forecast API error");
+      }
+
+      const data = await response.json();
+
+      if (!data.list) {
+        setForecast([]);
+        return;
+      }
+
+      const today = new Date();
+
+      // Group forecast items by date
+      const grouped = {};
+
+      data.list.forEach((item) => {
+        const date = new Date(item.dt * 1000);
+
+        // Ignore today's date
+        if (
+          date.toDateString() === today.toDateString()
+        ) {
+          return;
+        }
+
+        const dateKey = date.toISOString().split("T")[0];
+
+        if (!grouped[dateKey]) {
+          grouped[dateKey] = [];
+        }
+
+        grouped[dateKey].push(item);
+      });
+
+      const days = Object.values(grouped)
+        .slice(0, 7)
+        .map((dayItems) => {
+          // Try to find a forecast around noon
+          const daytime =
+            dayItems.find((item) => {
+              const hour = new Date(
+                item.dt * 1000
+              ).getHours();
+
+              return hour >= 11 && hour <= 14;
+            }) || dayItems[0];
+
+          return daytime;
+        });
+
+      setForecast(days);
+    } catch (err) {
+      console.error("Forecast error:", err);
+      setForecast([]);
+    }
+  };
+
+  // -----------------------------
   // WEATHER BY GPS COORDINATES
   // -----------------------------
-  const getWeatherByCoordinates = async (latitude, longitude) => {
+  const getWeatherByCoordinates = async (
+    latitude,
+    longitude
+  ) => {
     try {
       setLoading(true);
       setError("");
 
-      // Exact GPS weather
+      // Current weather
       const weatherResponse = await fetch(
         `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&units=metric&appid=${API_KEY}`
       );
@@ -150,10 +226,16 @@ export default function App() {
 
       const weatherData = await weatherResponse.json();
 
+      // Get forecast
+      await getForecast(latitude, longitude);
+
       // ----------------------------------------
-      // FIRST: CHECK OUR LOCAL RAMORA/UOM AREA
+      // FIRST: CHECK RAMORA/UOM AREA
       // ----------------------------------------
-      const knownArea = getLocalArea(latitude, longitude);
+      const knownArea = getLocalArea(
+        latitude,
+        longitude
+      );
 
       if (knownArea) {
         setLocation({
@@ -182,13 +264,18 @@ export default function App() {
           );
 
           if (locationResponse.ok) {
-            locationData = await locationResponse.json();
+            locationData =
+              await locationResponse.json();
           }
         } catch (geoError) {
-          console.error("Reverse geocoding error:", geoError);
+          console.error(
+            "Reverse geocoding error:",
+            geoError
+          );
         }
 
-        const address = locationData?.address || {};
+        const address =
+          locationData?.address || {};
 
         const name =
           address.neighbourhood ||
@@ -212,7 +299,8 @@ export default function App() {
           address.province ||
           "";
 
-        const country = address.country || "";
+        const country =
+          address.country || "";
 
         setLocation({
           name,
@@ -262,6 +350,12 @@ export default function App() {
 
       const data = await response.json();
 
+      // Get forecast for searched city
+      await getForecast(
+        data.coord.lat,
+        data.coord.lon
+      );
+
       setWeather(data);
 
       setLocation({
@@ -279,7 +373,10 @@ export default function App() {
     } catch (err) {
       console.error(err);
 
-      setError("City not found. Please check the spelling.");
+      setError(
+        "City not found. Please check the spelling."
+      );
+
       setLoading(false);
     }
   };
@@ -287,39 +384,79 @@ export default function App() {
   // -----------------------------
   // WEATHER ICON
   // -----------------------------
-  const getWeatherIcon = () => {
-    const condition = weather?.weather?.[0]?.main?.toLowerCase();
+  const getWeatherIcon = (condition) => {
+    const weatherCondition =
+      condition?.toLowerCase();
 
-    if (!condition) return "🌤️";
+    if (!weatherCondition) return "🌤️";
 
-    if (condition.includes("thunderstorm")) return "⛈️";
-    if (condition.includes("drizzle")) return "🌦️";
-    if (condition.includes("rain")) return "🌧️";
-    if (condition.includes("snow")) return "❄️";
-    if (condition.includes("mist")) return "🌫️";
-    if (condition.includes("fog")) return "🌫️";
-    if (condition.includes("haze")) return "🌫️";
-    if (condition.includes("cloud")) return "☁️";
-    if (condition.includes("clear")) return "☀️";
+    if (
+      weatherCondition.includes("thunderstorm")
+    )
+      return "⛈️";
+
+    if (weatherCondition.includes("drizzle"))
+      return "🌦️";
+
+    if (weatherCondition.includes("rain"))
+      return "🌧️";
+
+    if (weatherCondition.includes("snow"))
+      return "❄️";
+
+    if (
+      weatherCondition.includes("mist") ||
+      weatherCondition.includes("fog") ||
+      weatherCondition.includes("haze")
+    )
+      return "🌫️";
+
+    if (weatherCondition.includes("cloud"))
+      return "☁️";
+
+    if (weatherCondition.includes("clear"))
+      return "☀️";
 
     return "🌤️";
   };
 
   // -----------------------------
+  // FORECAST DATE
+  // -----------------------------
+  const formatForecastDay = (timestamp) => {
+    const date = new Date(timestamp * 1000);
+
+    return date.toLocaleDateString([], {
+      weekday: "short",
+    });
+  };
+
+  const formatForecastDate = (timestamp) => {
+    const date = new Date(timestamp * 1000);
+
+    return date.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  // -----------------------------
   // TIME
   // -----------------------------
-  const formattedTime = time.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  const formattedTime =
+    time.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
 
-  const formattedDate = time.toLocaleDateString([], {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  const formattedDate =
+    time.toLocaleDateString([], {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
 
   // -----------------------------
   // LOADING
@@ -328,13 +465,15 @@ export default function App() {
     return (
       <div className="app loading-screen">
         <div className="loading-card">
-          <div className="loading-icon">📍</div>
+          <div className="loading-icon">
+            📍
+          </div>
 
           <h1>Finding your location...</h1>
 
           <p>
-            Allow location access so WeatherNow can find the
-            weather around you.
+            Allow location access so WeatherNow
+            can find the weather around you.
           </p>
 
           <div className="loader"></div>
@@ -351,7 +490,10 @@ export default function App() {
         <div className="header-content">
 
           <div className="logo">
-            <span className="logo-icon">🌦️</span>
+            <span className="logo-icon">
+              🌦️
+            </span>
+
             <span>WeatherNow</span>
           </div>
 
@@ -373,13 +515,15 @@ export default function App() {
           <h1>Weather Forecast</h1>
 
           <p>
-            Accurate weather based on your actual location.
+            Accurate weather based on your
+            actual location.
           </p>
 
           <form
             onSubmit={searchWeather}
             className="search-form"
           >
+
             <input
               type="text"
               value={searchCity}
@@ -392,6 +536,7 @@ export default function App() {
             <button type="submit">
               Search
             </button>
+
           </form>
 
         </section>
@@ -421,13 +566,15 @@ export default function App() {
                 </p>
 
                 <h2>
-                  {location?.name || weather.name}
+                  {location?.name ||
+                    weather.name}
                 </h2>
 
                 <p className="location-details">
 
                   {location?.city &&
-                    location.city !== location.name &&
+                    location.city !==
+                      location.name &&
                     `${location.city}, `}
 
                   {location?.province &&
@@ -440,9 +587,15 @@ export default function App() {
                 {location?.latitude &&
                   location?.longitude && (
                     <p className="coordinates">
-                      GPS: {location.latitude.toFixed(5)}°,
-                      {" "}
-                      {location.longitude.toFixed(5)}°
+                      GPS:{" "}
+                      {location.latitude.toFixed(
+                        5
+                      )}
+                      °,{" "}
+                      {location.longitude.toFixed(
+                        5
+                      )}
+                      °
                     </p>
                   )}
 
@@ -454,13 +607,19 @@ export default function App() {
             <section className="time-card">
 
               <div>
+
                 <p className="time-label">
                   LOCAL TIME
                 </p>
 
-                <h2>{formattedTime}</h2>
+                <h2>
+                  {formattedTime}
+                </h2>
 
-                <p>{formattedDate}</p>
+                <p>
+                  {formattedDate}
+                </p>
+
               </div>
 
               <div className="clock-icon">
@@ -469,7 +628,7 @@ export default function App() {
 
             </section>
 
-            {/* WEATHER */}
+            {/* CURRENT WEATHER */}
             <section className="weather-main">
 
               <div className="weather-top">
@@ -481,29 +640,40 @@ export default function App() {
                   </p>
 
                   <h2>
-                    {weather.weather?.[0]?.description}
+                    {
+                      weather.weather?.[0]
+                        ?.description
+                    }
                   </h2>
 
                   <div className="temperature">
-                    {Math.round(weather.main.temp)}
+                    {Math.round(
+                      weather.main.temp
+                    )}
+
                     <span>°C</span>
                   </div>
 
                   <p className="feels">
                     Feels like{" "}
-                    {Math.round(weather.main.feels_like)}
+                    {Math.round(
+                      weather.main.feels_like
+                    )}
                     °C
                   </p>
 
                 </div>
 
                 <div className="weather-icon">
-                  {getWeatherIcon()}
+                  {getWeatherIcon(
+                    weather.weather?.[0]
+                      ?.main
+                  )}
                 </div>
 
               </div>
 
-              {/* DETAILS */}
+              {/* WEATHER DETAILS */}
               <div className="weather-details">
 
                 <div className="detail-card">
@@ -511,10 +681,12 @@ export default function App() {
 
                   <div>
                     <p>Humidity</p>
+
                     <strong>
                       {weather.main.humidity}%
                     </strong>
                   </div>
+
                 </div>
 
                 <div className="detail-card">
@@ -522,10 +694,12 @@ export default function App() {
 
                   <div>
                     <p>Wind Speed</p>
+
                     <strong>
                       {weather.wind.speed} m/s
                     </strong>
                   </div>
+
                 </div>
 
                 <div className="detail-card">
@@ -533,10 +707,12 @@ export default function App() {
 
                   <div>
                     <p>Pressure</p>
+
                     <strong>
                       {weather.main.pressure} hPa
                     </strong>
                   </div>
+
                 </div>
 
                 <div className="detail-card">
@@ -544,14 +720,17 @@ export default function App() {
 
                   <div>
                     <p>Visibility</p>
+
                     <strong>
                       {weather.visibility
                         ? `${(
-                            weather.visibility / 1000
+                            weather.visibility /
+                            1000
                           ).toFixed(1)} km`
                         : "N/A"}
                     </strong>
                   </div>
+
                 </div>
 
               </div>
@@ -562,38 +741,162 @@ export default function App() {
             <section className="sun-card">
 
               <div>
+
                 <span>🌅</span>
 
                 <div>
+
                   <p>Sunrise</p>
 
                   <strong>
                     {new Date(
-                      weather.sys.sunrise * 1000
+                      weather.sys.sunrise *
+                        1000
                     ).toLocaleTimeString([], {
                       hour: "2-digit",
                       minute: "2-digit",
                     })}
                   </strong>
+
                 </div>
+
               </div>
 
               <div>
+
                 <span>🌇</span>
 
                 <div>
+
                   <p>Sunset</p>
 
                   <strong>
                     {new Date(
-                      weather.sys.sunset * 1000
+                      weather.sys.sunset *
+                        1000
                     ).toLocaleTimeString([], {
                       hour: "2-digit",
                       minute: "2-digit",
                     })}
                   </strong>
+
                 </div>
+
               </div>
+
+            </section>
+
+            {/* 7 DAY FORECAST */}
+            <section className="forecast-section">
+
+              <div className="forecast-heading">
+
+                <div>
+                  <p className="weather-label">
+                    UPCOMING WEATHER
+                  </p>
+
+                  <h2>
+                    7-Day Forecast
+                  </h2>
+                </div>
+
+                <span className="forecast-icon">
+                  📅
+                </span>
+
+              </div>
+
+              {forecast.length > 0 ? (
+                <div className="forecast-grid">
+
+                  {forecast.map(
+                    (day, index) => (
+                      <div
+                        className="forecast-card"
+                        key={day.dt}
+                      >
+
+                        <p className="forecast-day">
+                          {index === 0
+                            ? "Tomorrow"
+                            : formatForecastDay(
+                                day.dt
+                              )}
+                        </p>
+
+                        <p className="forecast-date">
+                          {formatForecastDate(
+                            day.dt
+                          )}
+                        </p>
+
+                        <div className="forecast-weather-icon">
+                          {getWeatherIcon(
+                            day.weather?.[0]
+                              ?.main
+                          )}
+                        </div>
+
+                        <p className="forecast-condition">
+                          {
+                            day.weather?.[0]
+                              ?.description
+                          }
+                        </p>
+
+                        <div className="forecast-temp">
+                          <strong>
+                            {Math.round(
+                              day.main.temp
+                            )}
+                            °
+                          </strong>
+
+                          <span>
+                            Feels{" "}
+                            {Math.round(
+                              day.main
+                                .feels_like
+                            )}
+                            °
+                          </span>
+                        </div>
+
+                        <div className="forecast-info">
+
+                          <span>
+                            💧{" "}
+                            {day.main.humidity}%
+                          </span>
+
+                          <span>
+                            💨{" "}
+                            {day.wind.speed.toFixed(
+                              1
+                            )} m/s
+                          </span>
+
+                        </div>
+
+                      </div>
+                    )
+                  )}
+
+                </div>
+              ) : (
+                <div className="forecast-empty">
+                  <p>
+                    7-day forecast is currently
+                    unavailable.
+                  </p>
+                </div>
+              )}
+
+              <p className="forecast-note">
+                Forecast data is updated from
+                OpenWeather.
+              </p>
 
             </section>
 
@@ -606,11 +909,13 @@ export default function App() {
       <footer className="footer">
 
         <p>
-          🌦️ WeatherNow — Weather based on your GPS location
+          🌦️ WeatherNow — Weather based on
+          your GPS location
         </p>
 
         <p>
-          Built with React • OpenWeather API • GPS
+          Built with React • OpenWeather API •
+          GPS
         </p>
 
       </footer>
